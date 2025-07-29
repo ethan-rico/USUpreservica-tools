@@ -44,6 +44,5 @@ class PreservicaBrowser(tk.Tk):
 
                 if child.entity_type == EntityType.FOLDER:
                     self.tree.insert(child.reference, 'end', f"{child.reference}_dummy")
-
         except Exception as e:
             messagebox.showerror("Load Error", f"Failed to load folder: {e}")
