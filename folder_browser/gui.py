@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import csv
 import pyPreservica as pyp
+import xml.etree.ElementTree as ET
 
 class PreservicaBrowser(tk.Tk):
     def __init__(self, client):
@@ -55,39 +56,58 @@ class PreservicaBrowser(tk.Tk):
     def export_metadata(self):
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning("No Selection", "Please select at least one asset.")
+            messagebox.showwarning("Select at least one entity")
             return
 
-        export_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV Files", "*.csv")],
-            title="Save Metadata Export"
-        )
+        export_path = filedialog.asksaveasfilename(defaultextension=".csv",
+                                                filetypes=[("CSV", "*.csv")])
         if not export_path:
             return
 
-        rows = []
-        for node_id in selected:
-            try:
-                entity = self.client.entity(pyp.EntityType.ASSET, node_id)
-                print(f"[DEBUG] Processing asset: {entity.title} ({entity.reference})")
-                qdc_xml = self.client.metadata_for_entity(entity.reference, "QDC")
-                qdc_text = qdc_xml.decode("utf-8") if qdc_xml else ""
-                rows.append({
-                    "reference": entity.reference,
-                    "title": entity.title,
-                    "type": "ASSET",
-                    "qdc_metadata": qdc_text
-                })
-            except Exception as e:
-                print(f"[WARNING] Entity not found for ID {node_id}: {e}")
-                continue
+        rows, fieldnames = [], set()
+        fieldnames.update(["reference", "title", "type"])
+        fieldnames.update(["qdc_xml"])
 
-        try:
-            with open(export_path, mode="w", newline='', encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["reference", "title", "type", "qdc_metadata"])
-                writer.writeheader()
-                writer.writerows(rows)
-            messagebox.showinfo("Export Complete", f"Metadata exported to {export_path}")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export metadata: {e}")
+        for ref in selected:
+            # Determine asset or folder
+            try:
+                entity = self.client.asset(ref)
+                etype = "ASSET"
+            except Exception:
+                entity = self.client.folder(ref)
+                etype = "FOLDER"
+
+            meta_map = entity.metadata or {}
+            # Find any QDC schema match
+            qdc_url = next((u for u, s in meta_map.items()
+                            if "dc" in s.lower()), None)
+            xml_text = self.client.metadata(qdc_url) if qdc_url else ""
+            row = {
+                "reference": entity.reference,
+                "title": entity.title,
+                "type": etype,
+                "qdc_xml": xml_text.strip() if xml_text else ""
+            }
+
+            # Parse XML to extract dc: elements
+            if xml_text:
+                root = ET.fromstring(xml_text)
+                ns = {"dc": "http://purl.org/dc/elements/1.1/",
+                    "dcterms": "http://purl.org/dc/terms/"}
+                for prefix in ns:
+                    for elem in root.findall(f".//{{{ns[prefix]}}}*"):
+                        tag = elem.tag.split('}')[-1]
+                        col = f"dc:{tag}"
+                        val = elem.text or ""
+                        row[col] = val.strip()
+                        fieldnames.add(col)
+
+            rows.append(row)
+
+        # order header fields and write CSV
+        header = ["reference", "title", "type"] + sorted(f for f in fieldnames if f not in ("reference","title","type")) 
+        with open(export_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(rows)
+        messagebox.showinfo("Exported", f"Wrote {len(rows)} records to {export_path}")
