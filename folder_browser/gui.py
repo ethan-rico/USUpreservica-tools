@@ -78,9 +78,13 @@ class PreservicaBrowser(tk.Tk):
                 etype = "FOLDER"
 
             meta_map = entity.metadata or {}
+            print(f"[DEBUG] Metadata blocks for {entity.reference} ({entity.title}):")
+            for block_id, schema in meta_map.items():
+                print(f"  - Block ID: {block_id}")
+                print(f"    Schema: {schema}")
+
             # Find any QDC schema match
-            qdc_url = next((u for u, s in meta_map.items()
-                            if "dc" in s.lower()), None)
+            qdc_url = next((u for u, s in meta_map.items() if s.strip() == "http://purl.org/dc/elements/1.1/"), None)
             xml_text = self.client.metadata(qdc_url) if qdc_url else ""
             row = {
                 "reference": entity.reference,
@@ -94,13 +98,18 @@ class PreservicaBrowser(tk.Tk):
                 root = ET.fromstring(xml_text)
                 ns = {"dc": "http://purl.org/dc/elements/1.1/",
                     "dcterms": "http://purl.org/dc/terms/"}
+                counts = {}
                 for prefix in ns:
                     for elem in root.findall(f".//{{{ns[prefix]}}}*"):
                         tag = elem.tag.split('}')[-1]
-                        col = f"dc:{tag}"
-                        val = elem.text or ""
-                        row[col] = val.strip()
-                        fieldnames.add(col)
+                        base_col = f"dc:{tag}"
+                        val = (elem.text or "").strip()
+                        if val:
+                            count = counts.get(base_col, 0)
+                            col = base_col if count == 0 else f"{base_col}.{count}"
+                            row[col] = val
+                            fieldnames.add(col)
+                            counts[base_col] = count + 1
 
             rows.append(row)
 
