@@ -59,21 +59,25 @@ def update_asset_metadata(client: EntityAPI, reference: str, updated_metadata: D
     # Map namespace prefixes
     ns = {"dc": "http://purl.org/dc/elements/1.1/"}
 
-    # Update dc:* fields in-place
+    # Group repeated fields like dc:identifier, dc:identifier.1, etc.
+    grouped = defaultdict(list)
     for key, value in updated_metadata.items():
-        if not key.startswith("dc:") or not value.strip():
-            continue
+        if key.startswith("dc:") and value.strip():
+            base_key = re.sub(r"\.\d+$", "", key)
+            grouped[base_key].append(value.strip())
 
-        tag = key.split(":")[1]
-        existing_elements = root.findall(f"dc:{tag}", namespaces=ns)
+    # Remove existing elements and replace with all values for each group
+    for base_key, values in grouped.items():
+        tag = base_key.split(":")[1]
 
-        # Remove existing elements with this tag
-        for elem in existing_elements:
+        # Remove all existing elements of this tag
+        for elem in root.findall(f"dc:{tag}", namespaces=ns):
             root.remove(elem)
 
-        # Add new element
-        new_elem = ET.SubElement(root, f"{{{ns['dc']}}}{tag}")
-        new_elem.text = value.strip()
+        # Add all new elements for this tag
+        for val in values:
+            new_elem = ET.SubElement(root, f"{{{ns['dc']}}}{tag}")
+            new_elem.text = val
 
     # Generate updated XML
     updated_xml = ET.tostring(root, encoding="unicode")

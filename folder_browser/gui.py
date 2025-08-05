@@ -25,13 +25,31 @@ class PreservicaBrowser(tk.Tk):
         self.load_root_folder()
 
     def load_root_folder(self):
+        def on_submit():
+            folder_ref = entry.get().strip()
+            input_window.destroy()
+            self.load_starting_folder(folder_ref)
+
+        input_window = tk.Toplevel(self)
+        input_window.title("Enter Folder Reference")
+        input_window.geometry("400x100")
+
+        tk.Label(input_window, text="Enter starting folder reference ID:").pack(pady=5)
+        entry = tk.Entry(input_window, width=50)
+        entry.pack(pady=5)
+        entry.focus()
+
+        submit_btn = tk.Button(input_window, text="Load Folder", command=on_submit)
+        submit_btn.pack(pady=5)
+
+    def load_starting_folder(self, folder_ref):
         try:
-            root_folder = self.client.folder("d675ed12-ad33-4c65-b533-5dbccb3e5568")
-            print(f"[DEBUG] Loaded root folder: {root_folder.title} ({root_folder.reference})")
-            self.tree.insert('', 'end', root_folder.reference, text=root_folder.title)
-            self.tree.insert(root_folder.reference, 'end', f"{root_folder.reference}_dummy")
+            folder = self.client.folder(folder_ref)
+            self.tree.insert('', 'end', folder.reference, text=folder.title or "Untitled Folder")
+            self.tree.insert(folder.reference, 'end', f"{folder.reference}_dummy")
+            print(f"[DEBUG] Loaded folder {folder.title} ({folder.reference})")
         except Exception as e:
-            messagebox.showerror("Connection Error", f"{e}")
+            messagebox.showerror("Connection Error", f"Failed to load folder: {e}")
 
     def on_open_folder(self, event):
         node = self.tree.focus()
@@ -60,13 +78,12 @@ class PreservicaBrowser(tk.Tk):
             return
 
         export_path = filedialog.asksaveasfilename(defaultextension=".csv",
-                                                filetypes=[("CSV", "*.csv")])
+                                                   filetypes=[("CSV", "*.csv")])
         if not export_path:
             return
 
         rows, fieldnames = [], set()
-        fieldnames.update(["reference", "title", "type"])
-        fieldnames.update(["qdc_xml"])
+        fieldnames.update(["reference", "title", "type", "qdc_xml"])
 
         for ref in selected:
             # Determine asset or folder
@@ -83,8 +100,9 @@ class PreservicaBrowser(tk.Tk):
                 print(f"  - Block ID: {block_id}")
                 print(f"    Schema: {schema}")
 
-            # Find any QDC schema match
-            qdc_url = next((u for u, s in meta_map.items() if s.strip() == "http://purl.org/dc/elements/1.1/"), None)
+            # Find QDC block
+            qdc_url = next((u for u, s in meta_map.items()
+                            if s.strip() == "http://purl.org/dc/elements/1.1/"), None)
             xml_text = self.client.metadata(qdc_url) if qdc_url else ""
             row = {
                 "reference": entity.reference,
@@ -97,7 +115,7 @@ class PreservicaBrowser(tk.Tk):
             if xml_text:
                 root = ET.fromstring(xml_text)
                 ns = {"dc": "http://purl.org/dc/elements/1.1/",
-                    "dcterms": "http://purl.org/dc/terms/"}
+                      "dcterms": "http://purl.org/dc/terms/"}
                 counts = {}
                 for prefix in ns:
                     for elem in root.findall(f".//{{{ns[prefix]}}}*"):
@@ -113,8 +131,9 @@ class PreservicaBrowser(tk.Tk):
 
             rows.append(row)
 
-        # order header fields and write CSV
-        header = ["reference", "title", "type"] + sorted(f for f in fieldnames if f not in ("reference","title","type")) 
+        # Order header fields and write CSV
+        header = ["reference", "title", "type"] + sorted(
+            f for f in fieldnames if f not in ("reference", "title", "type"))
         with open(export_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=header)
             writer.writeheader()
